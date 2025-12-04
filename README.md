@@ -1,4 +1,6 @@
-# NailAI: Cloud-Powered Fine-Grained Nail Disease Detection System 🩺💅
+# NailAI: Cloud-Powered Fine-Grained Nail Disease Detection System 🩺
+
+https://nailai-backend-299381123286.us-central1.run.app/
 
 NailAI is a full-stack cloud-hosted AI diagnosis system that detects **22 fine-grained nail diseases** using a ResNet-18 model with Grad-CAM explainability.
 

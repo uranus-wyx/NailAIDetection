@@ -5,7 +5,7 @@ from typing import Optional
 class PredictionResult(BaseModel):
     disease_label: str
     confidence: float
-    gradcam_url: Optional[HttpUrl] = None  # 之後放 GCS URL
+    gradcam_url: Optional[HttpUrl] = None
 
 class PredictResponse(BaseModel):
     request_id: str

@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Virtual Nail Doctor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/x-icon" href="./static/favicon.ico" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+
+<body class="bg-gray-50 font-sans text-gray-800">
+  <div class="min-h-screen flex flex-col items-center justify-center px-4">
+    <div class="bg-white shadow-xl rounded-2xl p-8 max-w-xl w-full border-t-8 border-blue-500 relative">
+
+      <!-- Title & subtitle -->
+      <h1 class="text-2xl font-bold text-blue-700 text-center mb-4">🩺 Virtual Nail Disease Doctor</h1>
+      <p class="text-sm text-gray-600 text-center mb-6">
+        Upload or capture a nail image and get an AI-powered diagnosis with visual focus.
+      </p>
+
+      <!-- Main form (no native submit; handled via JS) -->
+      <form id="predict-form" class="space-y-4">
+        <!-- Input method tabs -->
+        <div class="mb-4">
+          <label class="block text-sm font-medium mb-1">Choose Input Method</label>
+          <div class="flex space-x-2">
+            <button type="button" id="tab-upload" class="tab-btn bg-blue-500 text-white px-4 py-1 rounded hover:bg-blue-600">📤 Upload</button>
+            <button type="button" id="tab-camera" class="tab-btn bg-gray-200 text-gray-700 px-4 py-1 rounded hover:bg-gray-300">📷 Camera</button>
+          </div>
+        </div>
+
+        <!-- Upload section -->
+        <div id="upload-section" class="mb-4">
+          <input type="file" id="image" name="file" accept="image/*" class="hidden" />
+          <span id="fileName" class="ml-2 text-sm text-gray-600"></span>
+        </div>
+
+        <!-- Camera section with overlay canvas for ROI guides -->
+        <div id="camera-container" class="hidden mb-4 relative">
+          <video id="cam" autoplay playsinline
+                 class="w-full max-h-80 rounded border"></video>
+          <canvas id="overlay" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+        </div>
+
+        <!-- Hidden canvas used for snapshot processing -->
+        <canvas id="canvas" class="hidden"></canvas>
+
+        <!-- Capture controls -->
+        <div class="mt-2 flex flex-col gap-2">
+          <button type="button" id="captureBtn"
+            class="w-full bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
+            📸 Take Photo
+          </button>
+        </div>
+
+        <!-- Submit to /predict -->
+        <button type="submit"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition">
+          🔍 Predict
+        </button>
+
+        <!-- Preview of the image sent to backend -->
+        <div id="preview-container" class="mt-4 hidden">
+          <label class="text-sm font-medium text-gray-700">🖼 Preview:</label>
+          <div class="w-[224px] h-[224px] border rounded-lg overflow-hidden">
+            <img id="preview-img" alt="Captured or uploaded preview" class="w-full h-full object-contain" />
+          </div>
+        </div>
+      </form>
+
+      <!-- Heatmap (Grad-CAM) section -->
+      <div class="mt-6">
+        <h2 class="text-lg font-semibold text-red-600">🔎 Grad-CAM Focus Area</h2>
+        <div class="flex items-center gap-2 mt-2">
+          <button id="btnToggleHeatmap" class="px-3 py-1 rounded bg-gray-800 text-white hover:bg-gray-700 active:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-500/50">Show Grad-CAM</button>
+          <button id="btnOpenHeatmap" class="px-3 py-1 rounded bg-gray-200">Open in new tab</button>
+        </div>
+        <img id="heatmap" src="" alt=""
+             class="mt-2 w-full max-h-96 border rounded" />
+        <div id="heatmap-info"
+             class="mt-2 text-sm text-red-600 font-semibold"></div>
+      </div>
+
+      <!-- Spinner (absolute inside card) -->
+      <div id="spinner" class="hidden absolute top-4 right-4" aria-live="polite">
+        <svg class="animate-spin h-6 w-6 text-blue-500" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10"
+                  stroke="currentColor" stroke-width="4" fill="none" />
+          <path class="opacity-75" fill="currentColor"
+                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+      </div>
+
+      <!-- Prediction result panel -->
+      <div id="result-section" class="mt-6">
+        <h2 class="text-lg font-semibold text-blue-600">Prediction Result</h2>
+        <div id="status" class="text-sm text-gray-600 mt-1">No capture yet.</div>
+        <pre id="result"
+             class="bg-gray-100 p-4 mt-2 rounded text-sm overflow-x-auto text-gray-500"> No prediction yet.
+        </pre>
+      </div>
+      <!-- Recent History -->
+      <div id="history-section" class="mt-8">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-gray-700">🕘 Recent Jobs (Local)</h2>
+          <button id="clear-history-btn"
+            class="px-3 py-1 bg-red-500 text-white text-sm rounded hover:bg-red-600 active:bg-red-700">
+            Clear History
+          </button>
+        </div>
+        <p class="text-sm text-gray-500">Stored only in this browser.</p>
+        <ul id="history-list" class="mt-3 space-y-2 text-sm"></ul>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ====== CONFIG ======
+    // Cloud Run 前後端同 origin 時，用 window.location.origin 即可。
+    const BASE_URL = window.location.origin;
+
+    // ====== DOM refs ======
+    const form = document.getElementById("predict-form");
+    const spinner = document.getElementById("spinner");
+    const resultBox = document.getElementById("result");
+    const imageInput = document.getElementById("image");
+    const fileName = document.getElementById("fileName");
+    const previewImg = document.getElementById("preview-img");
+    const previewContainer = document.getElementById("preview-container");
+    const heatmapImg = document.getElementById("heatmap");
+    const heatmapInfo = document.getElementById("heatmap-info");
+
+    const tabUpload = document.getElementById("tab-upload");
+    const tabCamera = document.getElementById("tab-camera");
+    const uploadSection = document.getElementById("upload-section");
+    const cameraSection = document.getElementById("camera-container");
+
+    const video = document.getElementById("cam");
+    const overlay = document.getElementById("overlay");
+    const hiddenCanvas = document.getElementById("canvas");
+
+    const captureBtn = document.getElementById("captureBtn");
+    const statusEl = document.getElementById("status");
+
+    const btnToggleHeatmap = document.getElementById("btnToggleHeatmap");
+    const btnOpenHeatmap   = document.getElementById("btnOpenHeatmap");
+
+    // 可以在 HTML 裡加一個 <p id="jobInfo"> 顯示 job 狀態（如果沒有也不會壞）
+    const jobInfo = document.getElementById("jobInfo");
+
+    // ====== UI state ======
+    let currentMode = "upload"; // 'upload' | 'camera'
+    let hasPredicted = false;
+    let savedHeatmapURL = null;
+    let isHeatmapVisible = false;
+
+    // Async mode state: job_id + polling 計時器
+    let currentJobId = null;
+    let statusTimer = null;
+
+    // Optional: geometry for rotated ROI set by external hand.js
+    window.__nailRoi = null;
+    // Optional static box provider:
+    // window.__staticRoiBox = () => ({ x1: 100, y1: 60, bw: 400, bh: 240 });
+
+    // ====== Helpers ======
+    function setPredicting(on) {
+      if (on) {
+        spinner.classList.remove("hidden");
+        resultBox.textContent = "🔄 Submitting job to queue...";
+      } else {
+        spinner.classList.add("hidden");
+      }
+    }
+
+    function setCaptureBtn(label, handler) {
+      captureBtn.textContent = label;
+      captureBtn.disabled = false;
+      captureBtn.onclick = null;
+      captureBtn.onclick = handler;
+    }
+
+    function toUploadTab() {
+      tabUpload.classList.replace("bg-gray-200", "bg-blue-500");
+      tabUpload.classList.replace("text-gray-700", "text-white");
+      tabCamera.classList.replace("bg-blue-500", "bg-gray-200");
+      tabCamera.classList.replace("text-white", "text-gray-700");
+      uploadSection.classList.remove("hidden");
+      cameraSection.classList.add("hidden");
+    }
+
+    function toCameraTab() {
+      tabCamera.classList.replace("bg-gray-200", "bg-blue-500");
+      tabCamera.classList.replace("text-gray-700", "text-white");
+      tabUpload.classList.replace("bg-blue-500", "bg-gray-200");
+      tabUpload.classList.replace("text-white", "text-gray-700");
+      uploadSection.classList.add("hidden");
+      cameraSection.classList.remove("hidden");
+    }
+
+    function setModeUpload() {
+      currentMode = "upload";
+      toUploadTab();
+      statusEl && (statusEl.textContent = "Upload an image or switch to Camera.");
+      // captureBtn 變成「選擇檔案」
+      setCaptureBtn("📤 Choose File", () => imageInput.click());
+    }
+
+    function setModeCamera() {
+      currentMode = "camera";
+      toCameraTab();
+      statusEl && (statusEl.textContent = "Camera ready. Align the nail in the box.");
+      if (window.__startStaticCamera) window.__startStaticCamera();
+      if (window.__staticFrameSync) window.__staticFrameSync();
+      // captureBtn 變成「拍照」
+      setCaptureBtn("📸 Take Photo", async () => {
+        await window.__captureAndSend?.();
+      });
+    }
+
+    tabUpload?.addEventListener("click", setModeUpload);
+    tabCamera?.addEventListener("click", setModeCamera);
+    setModeUpload();
+
+    function resolveHeatmapUrl(raw, base) {
+      if (!raw) return null;
+      if (/^https?:\/\//.test(raw)) return raw; // already absolute (GCS URL)
+      const b = base.replace(/\/+$/, "");
+      return `${b}/${raw.replace(/^\/+/, "")}`;
+    }
+
+    // Heatmap UI
+    function updateHeatmapUI() {
+      if (savedHeatmapURL) {
+        heatmapImg.src = savedHeatmapURL;
+        heatmapImg.style.display = isHeatmapVisible ? "block" : "none";
+        heatmapInfo.textContent = isHeatmapVisible
+          ? "🔥 Heatmap: red regions indicate the model's strongest evidence."
+          : "Heatmap hidden";
+        if (btnToggleHeatmap) btnToggleHeatmap.textContent = isHeatmapVisible ? "Hide Grad-CAM" : "Show Grad-CAM";
+      } else {
+        heatmapImg.removeAttribute("src");
+        heatmapImg.style.display = "none";
+        heatmapInfo.textContent = "Heatmap unavailable";
+        if (btnToggleHeatmap) btnToggleHeatmap.textContent = "Show Grad-CAM";
+      }
+    }
+
+    function renderPredictionFromData(data, base) {
+      const coarse = data.coarse_class ?? "(unknown)";
+      const finalLabel = data.predicted_class ?? "(rejected)";
+      const confidence = Number.isFinite(data.confidence) ? data.confidence : 0;
+
+      const lines = [];
+      lines.push(`🧭 Coarse (route): ${coarse}`);
+      lines.push(`🏁 Final: ${finalLabel}`);
+      lines.push(`🧠 Confidence: ${(confidence * 100).toFixed(2)}%`);
+      if (data.routed_via) lines.push(`🔀 Routed via: ${data.routed_via}`);
+      if (data.predicted_class == null) {
+        lines.push("⚠️ Model not confident enough. Please try another photo (clear lighting, single nail, in focus).");
+      }
+
+      // top-3
+      if (data.top3_probabilities && typeof data.top3_probabilities === "object") {
+        const top3 = Object.entries(data.top3_probabilities)
+          .map(([cls, prob]) => `• ${cls}: ${(prob * 100).toFixed(1)}%`)
+          .join("\n");
+        lines.push("\n🔥 Top3 Probabilities:\n" + top3);
+      }
+
+      // fine candidates
+      if (Array.isArray(data.fine_candidates) && data.fine_candidates.length > 0) {
+        lines.push("\n🧬 Possible Conditions:\n" + data.fine_candidates.map(d => `• ${d}`).join("\n"));
+      }
+
+      resultBox.textContent = lines.join("\n");
+      hasPredicted = true;
+
+      // Heatmap
+      if (data.heatmap_url && typeof data.heatmap_url === "string") {
+        savedHeatmapURL = resolveHeatmapUrl(data.heatmap_url, base || BASE_URL);
+        isHeatmapVisible = true; // or false if you want hide by default
+        updateHeatmapUI();
+
+        heatmapImg.style.cursor = "pointer";
+        heatmapImg.onclick = () => window.open(savedHeatmapURL, "_blank");
+      } else {
+        savedHeatmapURL = null;
+        isHeatmapVisible = false;
+        updateHeatmapUI();
+      }
+    }
+
+    // ====== Upload preview ======
+    imageInput?.addEventListener("change", () => {
+      if (imageInput.files?.[0]) {
+        fileName.textContent = imageInput.files[0].name;
+        const reader = new FileReader();
+        reader.onload = () => {
+          previewImg.src = reader.result;
+          previewContainer.classList.remove("hidden");
+          if (!hasPredicted) resultBox.textContent = "";
+        };
+        reader.readAsDataURL(imageInput.files[0]);
+      } else {
+        fileName.textContent = "";
+        previewImg.src = "";
+        previewContainer.classList.add("hidden");
+      }
+    });
+
+    // ====== ROI capture (A: rotated box; B: static box) ======
+    async function captureRoiBlobRotated() {
+      const vid = video;
+      if (!vid || !vid.videoWidth) throw new Error("Camera not ready");
+      const geom = window.__nailRoi;
+      if (!geom) throw new Error("Nail ROI not ready");
+
+      const { cx, cy, w, h, theta } = geom;
+      const c = Math.cos(theta), s = Math.sin(theta);
+
+      const corners = [
+        {x: -w/2, y: -h/2},
+        {x:  w/2, y: -h/2},
+        {x:  w/2, y:  h/2},
+        {x: -w/2, y:  h/2},
+      ].map(p => ({ x: cx + p.x * c - p.y * s, y: cy + p.x * s + p.y * c }));
+
+      const xs = corners.map(p => p.x);
+      const ys = corners.map(p => p.y);
+      const minX = Math.max(0, Math.min(...xs) | 0);
+      const maxX = Math.min(vid.videoWidth,  Math.max(...xs) | 0);
+      const minY = Math.max(0, Math.min(...ys) | 0);
+      const maxY = Math.min(vid.videoHeight, Math.max(...ys) | 0);
+      const aabbW = Math.max(1, maxX - minX);
+      const aabbH = Math.max(1, maxY - minY);
+
+      const temp = document.createElement("canvas");
+      temp.width = aabbW; temp.height = aabbH;
+      const tctx = temp.getContext("2d");
+      tctx.drawImage(vid, minX, minY, aabbW, aabbH, 0, 0, aabbW, aabbH);
+
+      const rot = document.createElement("canvas");
+      rot.width = Math.ceil(w);
+      rot.height = Math.ceil(h);
+      const rctx = rot.getContext("2d");
+      rctx.translate(rot.width/2, rot.height/2);
+      rctx.rotate(-theta);
+      rctx.drawImage(temp, (cx - minX) - aabbW/2, (cy - minY) - aabbH/2);
+
+      const out = document.createElement("canvas");
+      out.width = 224; out.height = 224;
+      const octx = out.getContext("2d");
+      octx.drawImage(rot, 0, 0, out.width, out.height);
+
+      return new Promise(res => out.toBlob(b => res(b), "image/jpeg", 0.96));
+    }
+
+    async function captureRoiBlobStatic() {
+      const vid = video;
+      const ov  = overlay;
+      if (!vid || !vid.videoWidth) throw new Error("Camera not ready");
+
+      let box;
+      if (typeof window.__staticRoiBox === "function") {
+        box = window.__staticRoiBox();
+      } else {
+        const BOX_W_RATIO = 0.50;
+        const BOX_H_RATIO = 0.30;
+        const w = ov.width, h = ov.height;
+        const cx = (w/2)|0, cy = (h/2)|0;
+        const bw = (w*BOX_W_RATIO)|0, bh = (h*BOX_H_RATIO)|0;
+        const x1 = cx - (bw/2)|0, y1 = cy - (bh/2)|0;
+        box = { x1, y1, bw, bh };
+      }
+
+      const { x1, y1, bw, bh } = box;
+      const tmp = document.createElement("canvas");
+      tmp.width = bw; tmp.height = bh;
+      const tctx = tmp.getContext("2d");
+      tctx.drawImage(vid, x1, y1, bw, bh, 0, 0, bw, bh);
+
+      const out = document.createElement("canvas");
+      out.width = 224; out.height = 224;
+      const octx = out.getContext("2d");
+      octx.drawImage(tmp, 0, 0, out.width, out.height);
+
+      return new Promise(res => out.toBlob(b => res(b), "image/jpeg", 0.96));
+    }
+
+    async function captureRoiBlob() {
+      if (window.__nailRoi) return captureRoiBlobRotated();
+      return captureRoiBlobStatic();
+    }
+
+    // ====== Status polling for async mode ======
+    function startStatusPolling(jobId) {
+      currentJobId = jobId;
+      if (statusTimer) {
+        clearInterval(statusTimer);
+        statusTimer = null;
+      }
+
+      const base = BASE_URL.replace(/\/+$/, "");
+
+      async function checkOnce() {
+        try {
+          const res = await fetch(`${base}/status/${currentJobId}`);
+          if (!res.ok) {
+            console.error("Status check failed", res.status);
+            return;
+          }
+          const data = await res.json();
+          if (data.status === "PENDING") {
+            resultBox.textContent = `⏳ Job ${currentJobId} is still processing...`;
+            if (jobInfo) jobInfo.textContent = `Job ${currentJobId} ⏳ PENDING`;
+            return;
+          }
+          if (data.status === "DONE") {
+            renderPredictionFromData(data, base);
+            saveHistoryItem(
+              currentJobId,
+              data.predicted_class,
+              data.confidence
+            );
+            if (jobInfo) jobInfo.textContent = `Job ${currentJobId} ✔ DONE`;
+            clearInterval(statusTimer);
+            statusTimer = null;
+          } else if (data.status === "ERROR") {
+            resultBox.textContent = `❌ Job ${currentJobId} error: ${data.message || ""}`;
+            if (jobInfo) jobInfo.textContent = `Job ${currentJobId} ❌ ERROR`;
+            clearInterval(statusTimer);
+            statusTimer = null;
+          }
+        } catch (err) {
+          console.error("Status polling error", err);
+        }
+      }
+
+      // 先查一次，之後每 3 秒查一次
+      checkOnce();
+      statusTimer = setInterval(checkOnce, 3000);
+    }
+
+    function saveHistoryItem(jobId, predClass, confidence) {
+      const item = {
+        job_id: jobId,
+        predicted_class: predClass,
+        confidence: confidence,
+        created_at: new Date().toISOString()
+      };
+
+      let arr = JSON.parse(localStorage.getItem("nail_history") || "[]");
+
+      arr.unshift(item);
+
+      arr = arr.slice(0, 20);
+
+      localStorage.setItem("nail_history", JSON.stringify(arr));
+
+      renderHistoryList();
+    }
+
+    function renderHistoryList() {
+      const list = document.getElementById("history-list");
+      if (!list) return;
+
+      const arr = JSON.parse(localStorage.getItem("nail_history") || "[]");
+
+      if (arr.length === 0) {
+        list.innerHTML = `<li class="text-gray-400">No history yet.</li>`;
+        return;
+      }
+
+      list.innerHTML = arr.map(item => {
+        const t = new Date(item.created_at).toLocaleString();
+        return `
+          <li class="border px-3 py-2 rounded bg-gray-50 flex flex-col">
+            <span><b>Job:</b> ${item.job_id}</span>
+            <span><b>Result:</b> ${item.predicted_class}</span>
+            <span><b>Confidence:</b> ${(item.confidence * 100).toFixed(1)}%</span>
+            <span class="text-gray-500">${t}</span>
+          </li>
+        `;
+      }).join("");
+    }
+
+    function clearHistory() {
+      localStorage.removeItem("nail_history");
+      renderHistoryList();
+    }
+
+    // ====== Async send: /submit + /status ======
+    async function sendToPredict(fileOrBlob) {
+      try {
+        setPredicting(true);
+
+        if (fileOrBlob instanceof Blob && !(fileOrBlob instanceof File)) {
+          fileOrBlob = new File([fileOrBlob], "nail_roi.jpg", { type: "image/jpeg" });
+        }
+
+        const fd = new FormData();
+        fd.append("file", fileOrBlob);
+
+        const base = BASE_URL.replace(/\/+$/, "");
+        const res = await fetch(`${base}/submit`, { method: "POST", body: fd });
+
+        if (!res.ok) {
+          resultBox.textContent = `❌ Submit failed. Status: ${res.status}`;
+          savedHeatmapURL = null;
+          isHeatmapVisible = false;
+          updateHeatmapUI();
+          return;
+        }
+
+        let data;
+        try {
+          data = await res.json();
+        } catch {
+          resultBox.textContent = "❌ Submit failed: invalid JSON response.";
+          savedHeatmapURL = null;
+          isHeatmapVisible = false;
+          updateHeatmapUI();
+          return;
+        }
+
+        const jobId = data.job_id;
+        if (!jobId) {
+          resultBox.textContent = "❌ Submit succeeded but no job_id returned.";
+          return;
+        }
+
+        resultBox.textContent = `✅ Job queued. Job ID: ${jobId}\nWaiting for background inference...`;
+        if (jobInfo) jobInfo.textContent = `Job ${jobId} ⏳ QUEUED`;
+
+        startStatusPolling(jobId);
+
+      } catch (err) {
+        console.error(err);
+        resultBox.textContent = `❌ Prediction error: ${err?.message || err}`;
+        savedHeatmapURL = null;
+        isHeatmapVisible = false;
+        updateHeatmapUI();
+      } finally {
+        setPredicting(false);
+      }
+    }
+
+    // ====== Form submit（async flow） ======
+    form?.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const file = imageInput.files?.[0];
+      if (!file) {
+        if (!uploadSection.classList.contains("hidden")) {
+          alert("Please upload an image first.");
+        } else {
+          alert("Use the camera capture button (or wait for auto capture).");
+        }
+        return;
+      }
+      await sendToPredict(file);
+    });
+
+    // ====== Public hook to capture & send (camera) ======
+    window.__captureAndSend = async () => {
+      try {
+        statusEl && (statusEl.textContent = "Capturing ROI…");
+        const blob = await captureRoiBlob();
+        const url = URL.createObjectURL(blob);
+        previewImg.src = url;
+        previewContainer.classList.remove("hidden");
+        await sendToPredict(blob);
+        statusEl && (statusEl.textContent = "Job submitted.");
+      } catch (e) {
+        console.error(e);
+        statusEl && (statusEl.textContent = "Failed to snapshot or upload.");
+      }
+    };
+
+    // Heatmap UI controls
+    btnToggleHeatmap?.addEventListener("click", () => {
+      if (!savedHeatmapURL) {
+        alert("Please make a prediction first.");
+        return;
+      }
+      isHeatmapVisible = !isHeatmapVisible;
+      updateHeatmapUI();
+    });
+
+    btnOpenHeatmap?.addEventListener("click", () => {
+      if (!savedHeatmapURL) {
+        alert("Please make a prediction first.");
+        return;
+      }
+      window.open(savedHeatmapURL, "_blank");
+    });
+
+    // Keyboard shortcut: H toggles heatmap
+    document.addEventListener("keydown", (e) => {
+      if (e.key.toLowerCase() === "h") {
+        if (!savedHeatmapURL) return;
+        isHeatmapVisible = !isHeatmapVisible;
+        updateHeatmapUI();
+      }
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+      renderHistoryList();
+      const btn = document.getElementById("clear-history-btn");
+      if (btn) btn.addEventListener("click", clearHistory);
+    });
+
+
+    // Default to Upload tab
+    tabUpload?.click();
+    console.log("✅ main.js (async-only, Pub/Sub + Worker + BigQuery) loaded");
+  </script>
+
+  <!-- Optional: static-frame helper for camera overlay/ROI (ESM module) -->
+  <script type="module" defer src="/static/js/static_frame.js"></script>
+</body>
+</html>

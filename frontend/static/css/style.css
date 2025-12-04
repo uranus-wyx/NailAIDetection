@@ -1,0 +1,99 @@
+/* ===== Base tweaks ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box; /* Ensure padding/border don’t affect element width */
+}
+
+html, body {
+  height: 100%; /* Allow flexbox centering and full-height layouts */
+}
+
+body {
+  -webkit-font-smoothing: antialiased; /* Crisper text rendering (WebKit) */
+  -moz-osx-font-smoothing: grayscale;  /* Crisper text rendering (Firefox macOS) */
+  background-color: #f9fafb; /* Fallback similar to Tailwind bg-gray-50 */
+  color: #1f2937;           /* Fallback similar to Tailwind text-gray-800 */
+}
+
+/* Prevent unwanted scrollbars or gaps around <video> */
+video {
+  display: block;
+  max-width: 100%;
+}
+
+/* ===== Camera & Overlay ===== */
+/* Ensure overlay canvas sits directly above the video */
+#camera-container {
+  position: relative;  /* Makes overlay absolute positioning relative to this */
+  width: 100%;
+  overflow: hidden;    /* Crop any overflowing edges */
+}
+
+#cam {
+  width: 100%;
+  height: auto;
+  object-fit: cover;   /* Fill the container, maintaining aspect ratio */
+  border-radius: 0.5rem; /* Match Tailwind rounded style */
+}
+
+#overlay {
+  position: absolute;   /* Layer directly over the video */
+  inset: 0;             /* Full stretch */
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* Don’t block mouse/touch events */
+  z-index: 10;          /* Draw above everything else inside container */
+  image-rendering: optimizeQuality;
+  backface-visibility: hidden;
+  will-change: transform; /* Hint to browser: this will be redrawn often */
+}
+
+/* ===== Buttons / Tabs ===== */
+.tab-btn {
+  transition: background-color .2s ease,
+              color .2s ease,
+              box-shadow .2s ease;
+}
+
+.tab-btn:focus-visible {
+  outline: 2px solid #2563eb;  /* Accessible blue outline (≈ Tailwind blue-600) */
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+}
+
+button:disabled,
+button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ===== Preview / Panels ===== */
+#preview-container img,
+#heatmap {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain; /* Ensure full image visible inside frame */
+}
+
+/* Beautify result box with monospace font (backup to Tailwind defaults) */
+#result {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+               "Liberation Mono", "Courier New", monospace;
+  white-space: pre-wrap; /* Prevent horizontal scrolling on mobile */
+  word-break: break-word; /* Break long strings safely */
+}
+
+/* ===== Responsive polish ===== */
+@media (max-width: 640px) {
+  .min-h-screen > .bg-white {
+    padding: 1rem; /* Slightly tighter padding on small screens */
+  }
+}
+
+/* ===== Utility ===== */
+/* Supplementary styling for small status text */
+#status {
+  color: #6b7280; /* text-gray-500 fallback */
+}

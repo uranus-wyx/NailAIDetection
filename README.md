@@ -282,10 +282,3 @@ Features:
 | CORS issues                   | Deploy frontend & backend to same origin |
 | BigQuery insert failed        | Check schema mismatch                    |
 
----
-
-# 🙌 Acknowledgments
-
-DTSA 5503 – Cloud & Big Data Computing
-Instructor: Max Hollingsworth
-CU Boulder, MS-DS Program

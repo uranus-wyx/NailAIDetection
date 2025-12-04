@@ -34,7 +34,7 @@ This project serves as the final project for **CSCI4253/5253 – Datacenter Scal
 
 # 🏗️ System Architecture
 
-![DataCenter-Project Proposal (1)](https://hackmd.io/_uploads/SyYgRY1f-g.jpg)
+![Architecture](assets/architecture.jpg)
 
 # 📁 Repository Structure
 
@@ -228,10 +228,11 @@ Features:
 # 🔍 Demo Flow
 
 1. User uploads image or captures via camera
-![截圖 2025-12-04 15.54.05](https://hackmd.io/_uploads/BJ9f-5kzZx.png)
+![Architecture](assets/demo1.png)
 
 2. Frontend sends **POST /submit**
-![截圖 2025-12-04 15.55.51](https://hackmd.io/_uploads/H14t-91fZx.png)
+![Architecture](assets/demo2.png)
+
 
 3. Backend:
 
@@ -239,12 +240,11 @@ Features:
    * Publishes Pub/Sub message
 
 **Store images into buckets**
-![截圖 2025-12-04 16.16.52](https://hackmd.io/_uploads/BJb_IqJzZx.png)
-
-
+![Architecture](assets/demo3.png)
 
 **Job is processing in queue**
-![截圖 2025-12-04 15.59.30](https://hackmd.io/_uploads/ryyDM91GZg.png)
+![Architecture](assets/demo4.png)
+
 
 4. Worker:
 
@@ -266,14 +266,16 @@ ORDER BY predicted_at DESC
 LIMIT 10;
 ```
 
-![截圖 2025-12-04 16.14.23](https://hackmd.io/_uploads/HkCCr9yG-e.png)
+![Architecture](assets/demo5.png)
+
 
 5. Frontend:
 
    * Polls /status
    * Displays results + heatmap
 
-![截圖 2025-12-04 15.57.19](https://hackmd.io/_uploads/H1JJf91zbx.png)
+![Architecture](assets/demo6.png)
+
 
 # ⚠️ Troubleshooting
 

@@ -1,6 +1,8 @@
 # NailAI: Cloud-Powered Fine-Grained Nail Disease Detection System 🩺
 
-https://nailai-backend-299381123286.us-central1.run.app/
+NailAI is a fully serverless, production-ready medical AI pipeline that scales automatically and provides explainable fine-grained diagnostics through a cloud-native microservice design.
+
+🌐 https://nailai-backend-299381123286.us-central1.run.app/
 
 NailAI is a full-stack cloud-hosted AI diagnosis system that detects **22 fine-grained nail diseases** using a ResNet-18 model with Grad-CAM explainability.
 
@@ -14,9 +16,8 @@ The system demonstrates a complete **serverless AI microservice architecture**, 
 - **JS Web UI** (upload + camera mode)
 - **Fine-grained hierarchical classifier**
 
-This project serves as the final project for **DTSA 5503 – Cloud & Big Data Computing**.
+This project serves as the final project for **CSCI4253/5253 – Datacenter Scale Computing**.
 
----
 
 # ✨ Features
 
@@ -31,48 +32,40 @@ This project serves as the final project for **DTSA 5503 – Cloud & Big Data Co
 ✅ Local browser history viewer  
 ✅ 100% serverless, auto-scaling  
 
----
-
 # 🏗️ System Architecture
 
-
----
+![DataCenter-Project Proposal (1)](https://hackmd.io/_uploads/SyYgRY1f-g.jpg)
 
 # 📁 Repository Structure
 
-```
-
+```text
 NailAI/
 │
 ├── backend/
 │   ├── app/
-│   │   ├── main.py               # FastAPI backend: /submit, /status
-│   │   ├── utils.py              # Image loading, Grad-CAM helpers
-│   │   ├── model_loader.py       # Load hierarchical ResNet18
-│   │   ├── inference.py          # Logic shared with worker
+│   │   ├── main.py               
+│   │   ├── utils_hierarchical.py
+│   │   ├── inference.py          
+│   ├── artifacts/
+│   │   ├── labels.json           
+│   ├── models/
+│   │   ├── nail_model.pth        
 │   └── requirements.txt
+│   └── Dockerfile
 │
 ├── worker/
-│   ├── worker.py                 # Pub/Sub consumer + inference
+│   ├── worker_main.py            
 │   └── Dockerfile
 │
 ├── frontend/
 │   ├── index.html
 │   ├── static/
-│   │   ├── js/
-│   │   │   ├── main.js           # async submit + polling
-│   │   │   └── static_frame.js
-│   │   ├── css/style.css
-│   │   └── favicon.ico
-│
-├── model/
-│   └── nail_model.pth            # Trained model file
+│       ├── js/static_frame.js
+│       ├── css/style.css
+│       └── favicon.ico
 │
 └── README.md
-
 ```
-
----
 
 # 🚀 Deployment Guide (Cloud Run + Cloud Build)
 
@@ -86,7 +79,18 @@ gcloud services enable \
   storage.googleapis.com
 ````
 
----
+### Backend Env Vars
+```
+PUBSUB_TOPIC=nailai-jobs
+BUCKET_NAME=nailai-demo-bucket
+```
+
+### Worker Env Vars
+```
+HEATMAP_BUCKET=nailai-demo-bucket
+BQ_DATASET=nailai_analytics
+BQ_TABLE=inference_log
+```
 
 ## **2. Create Storage Bucket**
 
@@ -94,15 +98,11 @@ gcloud services enable \
 gsutil mb -l us-central1 gs://nailai-demo-bucket/
 ```
 
----
-
 ## **3. Create Pub/Sub Topic**
 
 ```bash
 gcloud pubsub topics create nailai-jobs
 ```
-
----
 
 ## **4. Create BigQuery Dataset + Table**
 
@@ -134,34 +134,39 @@ Example schema:
 ]
 ```
 
----
-
 # 🐳 5. Deploy Backend (Cloud Run)
 
-From repo root:
+From backend:
 
 ```bash
-gcloud builds submit --tag gcr.io/<PROJECT_ID>/nailai-backend
-gcloud run deploy nailai-backend \
-  --image gcr.io/<PROJECT_ID>/nailai-backend \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated
-```
+gcloud builds submit . \
+  --tag gcr.io/nailai-demo/nailai-backend \
+  --project=nailai-demo
 
----
+gcloud run deploy nailai-backend \
+  --image gcr.io/nailai-demo/nailai-backend \
+  --region us-central1 \
+  --platform managed \
+  --project nailai-demo
+```
 
 # 🐳 6. Deploy Worker (Cloud Run)
 
 ```bash
-gcloud builds submit worker/ --tag gcr.io/<PROJECT_ID>/nailai-worker
+# build
+docker build -t nailai-worker -f worker/Dockerfile .
+# tag
+docker tag nailai-worker gcr.io/nailai-demo/nailai-worker
+# push
+docker push gcr.io/nailai-demo/nailai-worker
 
 gcloud run deploy nailai-worker \
-  --image gcr.io/<PROJECT_ID>/nailai-worker \
-  --platform managed \
+  --image gcr.io/nailai-demo/nailai-worker \
   --region us-central1 \
-  --max-instances=5 \
-  --allow-unauthenticated
+  --platform managed \
+  --allow-unauthenticated \
+  --set-env-vars BQ_DATASET=nailai_analytics,BQ_TABLE=inference_log,HEATMAP_BUCKET=nailai-demo-bucket
+
 ```
 
 Bind worker to the Pub/Sub trigger:
@@ -179,8 +184,6 @@ gcloud pubsub subscriptions create nailai-sub \
   --push-auth-service-account=PROJECT_NUM-compute@developer.gserviceaccount.com
 ```
 
----
-
 # 🧪 Local Development
 
 ### Install dependencies:
@@ -196,14 +199,13 @@ cd backend
 uvicorn app.main:app --reload --port 8080
 ```
 
----
-
 # 🌐 Frontend Usage
 
 Open:
 
 ```
 https://<CLOUD_RUN_BACKEND_URL>
+# https://nailai-backend-299381123286.us-central1.run.app/
 ```
 
 Features:
@@ -215,8 +217,6 @@ Features:
 * 🔥 Grad-CAM heatmap
 * 🕘 Local history viewer (browser only)
 
----
-
 # 🧠 ML Model
 
 * ResNet-18 backbone
@@ -225,29 +225,62 @@ Features:
 * Grad-CAM explanation
 * Hierarchical coarse → fine routing
 
----
-
 # 🔍 Demo Flow
 
 1. User uploads image or captures via camera
+![截圖 2025-12-04 15.54.05](https://hackmd.io/_uploads/BJ9f-5kzZx.png)
+
 2. Frontend sends **POST /submit**
+![截圖 2025-12-04 15.55.51](https://hackmd.io/_uploads/H14t-91fZx.png)
+
 3. Backend:
 
    * Stores image
    * Publishes Pub/Sub message
+
+**Store images into buckets**
+![截圖 2025-12-04 16.16.52](https://hackmd.io/_uploads/BJb_IqJzZx.png)
+
+
+
+**Job is processing in queue**
+![截圖 2025-12-04 15.59.30](https://hackmd.io/_uploads/ryyDM91GZg.png)
+
 4. Worker:
 
    * Runs inference
    * Generates heatmap
    * Writes to BigQuery
+
+**Check data in BigQuery**
+```
+SELECT
+  predicted_at,
+  predicted_class,
+  confidence,
+  routed_via,
+  input_image_url,
+  heatmap_url
+FROM `nailai-demo.nailai_analytics.predictions`
+ORDER BY predicted_at DESC
+LIMIT 10;
+```
+
+![截圖 2025-12-04 16.14.23](https://hackmd.io/_uploads/HkCCr9yG-e.png)
+
 5. Frontend:
 
    * Polls /status
    * Displays results + heatmap
 
----
+![截圖 2025-12-04 15.57.19](https://hackmd.io/_uploads/H1JJf91zbx.png)
 
 # ⚠️ Troubleshooting
+
+### Cloud Logging
+```
+gcloud logs read --project nailai-demo --limit 50
+```
 
 | Issue                         | Fix                                      |
 | ----------------------------- | ---------------------------------------- |

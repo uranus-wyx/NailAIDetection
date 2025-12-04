@@ -118,7 +118,12 @@ async function loop() {
  */
 async function init() {
   // Request camera stream
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  facingMode: { ideal: "environment" }
+                }
+              });
+
   video.srcObject = stream;
 
   // Ensure metadata is loaded so we know the actual dimensions

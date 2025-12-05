@@ -1,0 +1,20 @@
+fastapi
+uvicorn
+python-multipart
+
+torch
+torchvision
+numpy
+Pillow
+
+# Grad-CAM (for heatmap generation)
+ttach
+grad-cam
+
+# Google Cloud interaction
+google-cloud-storage
+google-cloud-pubsub
+google-cloud-bigquery
+
+# Utilities
+python-dotenv

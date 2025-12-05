@@ -147,7 +147,7 @@ gcloud run deploy nailai-backend \
   --image gcr.io/nailai-demo/nailai-backend \
   --region us-central1 \
   --platform managed \
-  --project nailai-demo
+  --allow-unauthenticated \
 ```
 
 # 🐳 6. Deploy Worker (Cloud Run)

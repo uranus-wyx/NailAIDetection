@@ -5,30 +5,31 @@ FROM python:3.11-slim
 # Working directory inside the container
 WORKDIR /app
 
-# ==== System deps (for OpenCV / torch, etc.) ====
+# ==== System dependencies (for OpenCV, PyTorch, etc.) ====
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libglib2.0-0 libsm6 libxrender1 libxext6 \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
  && rm -rf /var/lib/apt/lists/*
 
-# ==== Python deps ====
-# 現在 build context 就是 backend/，所以這裡用 requirements.txt 就好
+# ==== Python dependencies ====
+# Build context is backend/, so requirements.txt can be copied directly
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # ==== App code ====
-# 把整個 backend 專案內容複製到 /app/backend 裡
-# 這樣原本的匯入路徑 backend.app.main 仍然成立
+# Copy the entire backend project into /app/backend
+# This preserves the original import path: backend.app.main
 COPY . ./backend
 
-# 建 predict_data 目錄（給 Grad-CAM 存 local 檔用，如果有）
+# Create predict_data directory (for saving local Grad-CAM outputs if needed)
 RUN mkdir -p /app/predict_data
 
-# ==== Env ====
-ENV PORT=8080
+# ==== Environment ====
 ENV PYTHONPATH="/app"
 
 # ==== Entrypoint ====
-# 注意：這裡仍然用 backend.app.main:app
-CMD uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT}
-
+CMD ["sh", "-c", "uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

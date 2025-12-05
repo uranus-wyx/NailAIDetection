@@ -117,7 +117,7 @@
 
   <script>
     // ====== CONFIG ======
-    // Cloud Run 前後端同 origin 時，用 window.location.origin 即可。
+    // When frontend and backend share the same origin in Cloud Run, window.location.origin is sufficient.
     const BASE_URL = window.location.origin;
 
     // ====== DOM refs ======
@@ -146,7 +146,7 @@
     const btnToggleHeatmap = document.getElementById("btnToggleHeatmap");
     const btnOpenHeatmap   = document.getElementById("btnOpenHeatmap");
 
-    // 可以在 HTML 裡加一個 <p id="jobInfo"> 顯示 job 狀態（如果沒有也不會壞）
+    // You can optionally add <p id="jobInfo"> in HTML to display job status (if omitted, nothing breaks).
     const jobInfo = document.getElementById("jobInfo");
 
     // ====== UI state ======
@@ -155,7 +155,7 @@
     let savedHeatmapURL = null;
     let isHeatmapVisible = false;
 
-    // Async mode state: job_id + polling 計時器
+    // Async mode state: job_id + polling timer
     let currentJobId = null;
     let statusTimer = null;
 
@@ -203,7 +203,7 @@
       currentMode = "upload";
       toUploadTab();
       statusEl && (statusEl.textContent = "Upload an image or switch to Camera.");
-      // captureBtn 變成「選擇檔案」
+      // captureBtn becomes “Choose File”
       setCaptureBtn("📤 Choose File", () => imageInput.click());
     }
 
@@ -213,7 +213,7 @@
       statusEl && (statusEl.textContent = "Camera ready. Align the nail in the box.");
       if (window.__startStaticCamera) window.__startStaticCamera();
       if (window.__staticFrameSync) window.__staticFrameSync();
-      // captureBtn 變成「拍照」
+      // captureBtn becomes “Take Photo”
       setCaptureBtn("📸 Take Photo", async () => {
         await window.__captureAndSend?.();
       });
@@ -438,7 +438,7 @@
         }
       }
 
-      // 先查一次，之後每 3 秒查一次
+      // Check once immediately, then every 3 seconds
       checkOnce();
       statusTimer = setInterval(checkOnce, 3000);
     }
@@ -547,7 +547,7 @@
       }
     }
 
-    // ====== Form submit（async flow） ======
+    // ====== Form submit (async flow) ======
     form?.addEventListener("submit", async (e) => {
       e.preventDefault();
       const file = imageInput.files?.[0];
@@ -610,7 +610,6 @@
       const btn = document.getElementById("clear-history-btn");
       if (btn) btn.addEventListener("click", clearHistory);
     });
-
 
     // Default to Upload tab
     tabUpload?.click();

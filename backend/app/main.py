@@ -20,12 +20,12 @@ from backend.app.utils_hierarchical import (
 )
 
 # ---------------- Paths ----------------
-# Resolve paths relative to this file, not the working directory.
+# Resolve all paths relative to this file instead of the working directory.
 BASE = Path(__file__).parent.resolve()          # backend/app
 FRONTEND_DIR = (BASE / "../../frontend").resolve()
 PREDICT_DIR  = (BASE / "../../predict_data").resolve()
 
-# Ensure static directories exist (StaticFiles will error if missing).
+# Ensure static directories exist (StaticFiles requires them to exist).
 PREDICT_DIR.mkdir(parents=True, exist_ok=True)
 (FRONTEND_DIR / "static").mkdir(parents=True, exist_ok=True)
 
@@ -49,7 +49,7 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="
 @app.on_event("startup")
 def _startup():
     """
-    Load all models into memory once at process start.
+    Load all models into memory at process startup.
     utils_hierarchical.init_models() handles device selection and caching.
     """
     init_models()
@@ -63,7 +63,7 @@ async def healthz():
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """
-    Serve the SPA entrypoint. Uses absolute path to avoid CWD surprises.
+    Serve the SPA entrypoint. Uses absolute path to avoid CWD issues.
     """
     index_path = FRONTEND_DIR / "index.html"
     if not index_path.exists():
@@ -77,15 +77,14 @@ async def root():
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     """
-    Accept an uploaded image and return hierarchical prediction JSON
-    (coarse route, final label, confidence, top3, heatmap URL, etc.).
+    Accept an uploaded image and return hierarchical prediction results in JSON:
+    (coarse route, final label, confidence, top3, heatmap URL, etc.)
     """
     try:
-        # Basic content-type sanity check (non-fatal — just informational)
+        # Basic content-type sanity check (non-fatal — PIL will validate later)
         content_type = file.content_type or ""
         if not content_type.startswith("image/"):
-            # Continue anyway; PIL will validate later in the pipeline.
-            pass
+            pass  # allow anyway
 
         # Read raw bytes and feed directly to hierarchical_predict()
         image_bytes = await file.read()
@@ -105,18 +104,19 @@ async def predict(file: UploadFile = File(...)):
         return JSONResponse(result)
 
     except Exception as e:
-        # Log-friendly error payload; keep structure stable for frontend.
+        # Error payload with stable structure for frontend
         return JSONResponse(
             {"error": str(e), "predicted_class": None, "coarse_class": None, "routed_via": "exception"},
             status_code=500,
         )
-    
+
+
 @app.get("/status/{job_id}")
 async def get_status(job_id: str):
     """
-    查詢非同步推論狀態：
-      - 如果找不到任何這個 job_id 的紀錄 → PENDING
-      - 如果找到 → DONE + 回傳推論結果
+    Query asynchronous inference status:
+      - If no record exists for this job_id → PENDING
+      - If a record exists → DONE + return the inference result
     """
     try:
         client = get_bq_client()
@@ -148,7 +148,7 @@ async def get_status(job_id: str):
         rows = list(client.query(query, job_config=job_config))
 
         if not rows:
-            # Worker 還沒寫入結果
+            # Worker has not written the result yet
             return JSONResponse(
                 {
                     "job_id": job_id,
@@ -159,7 +159,7 @@ async def get_status(job_id: str):
 
         row = rows[0]
 
-        # 解析 JSON 欄位
+        # Parse JSON fields
         try:
             top3 = json.loads(row.top3_json or "{}")
         except Exception:
@@ -186,7 +186,7 @@ async def get_status(job_id: str):
         )
 
     except Exception as e:
-        # 查詢失敗也不要 crash，回 FAILED 狀態
+        # Query failure should not crash; return ERROR state
         return JSONResponse(
             {
                 "job_id": job_id,
@@ -195,45 +195,44 @@ async def get_status(job_id: str):
             },
             status_code=500,
         )
-    
+
+
 @app.post("/submit")
 async def submit_job(file: UploadFile = File(...)):
     """
-    非同步版入口：
-      1) 收圖片 → 存到 GCS
-      2) 建 job_id
-      3) 丟一個 Pub/Sub 訊息（只有 metadata，不包含 raw bytes）
-      4) 回 { job_id, input_image_url } 給前端
+    Asynchronous inference entrypoint:
+      1) Receive image → upload to GCS
+      2) Create job_id
+      3) Publish a Pub/Sub message (metadata only, no raw bytes)
+      4) Return { job_id, input_image_url } to the frontend
     """
     try:
         image_bytes = await file.read()
 
-        # 1) 先把原圖丟到 GCS，取得 URL（這裡用你 utils 裡的 helper）
+        # 1) Upload original image to GCS and obtain URL
         input_image_url = None
         try:
-            from backend.app.utils_hierarchical import save_input_image  # 或最上面全域 import
+            from backend.app.utils_hierarchical import save_input_image
             input_image_url = save_input_image(image_bytes)
         except Exception as e:
-            # 如果這裡掛了，你可以選擇直接拒絕工作，或先不存原圖。
             print(f"[submit] save_input_image failed: {e}")
             raise
 
-        # 2) 建 job_id（UUID）
+        # 2) Create job_id (UUID)
         job_id = str(uuid.uuid4())
         requested_at = datetime.now(timezone.utc).isoformat()
 
-        # 3) 組 Pub/Sub job payload
+        # 3) Build Pub/Sub job payload
         job_payload = {
             "job_id": job_id,
             "gcs_image_url": input_image_url,
             "requested_at": requested_at,
-            # 後續如果你加 Firestore，可以在這裡順便寫 PENDING 狀態
         }
 
-        # 4) 丟進 Pub/Sub
+        # 4) Publish to Pub/Sub
         publish_inference_job(job_payload)
 
-        # 5) 回給前端（目前只告訴他 job 已接受，結果之後查）
+        # 5) Return to frontend (job accepted; result will be queried later)
         return JSONResponse(
             {
                 "job_id": job_id,

@@ -278,31 +278,31 @@ for fine, coarse in label_map_22_to_10.items():
 
 def save_heatmap(pil_image: Image.Image):
     """
-    如果設定了 GCS_BUCKET_NAME → 上傳到 Cloud Storage 並回傳公開 URL。
-    否則 fallback 存到本地 predict_data/，回傳相對路徑（本機 debug 用）。
+    If GCS_BUCKET_NAME is set → upload to Cloud Storage and return public URL.
+    Otherwise, fallback to saving in local predict_data/ and return a relative path (for local debugging).
     """
     timestamp = int(time.time())
     filename = f"hint_{timestamp}.jpg"
 
     if GCS_BUCKET_NAME:
-        # 上傳到 GCS
+        # Upload to GCS
         client = get_gcs_client()
         bucket = client.bucket(GCS_BUCKET_NAME)
         blob_path = f"heatmaps/{filename}"
         blob = bucket.blob(blob_path)
 
-        # 將 PIL image 存到記憶體再上傳
+        # Save PIL image into memory before uploading
         buf = io.BytesIO()
         pil_image.save(buf, format="JPEG")
         buf.seek(0)
 
         blob.upload_from_file(buf, content_type="image/jpeg")
 
-        # Demo 用，直接設成 public；正式可以改成 signed URL
+        # For demo purposes: make file public; production can switch to signed URLs
         blob.make_public()
-        return blob.public_url   # ex: https://storage.googleapis.com/bucket/heatmaps/xxx.jpg
+        return blob.public_url
 
-    # 沒設定 GCS_BUCKET_NAME → 保留原本本地行為（本機開發）
+    # Without GCS_BUCKET_NAME → keep original local behavior (for local development)
     PREDICT_DIR.mkdir(parents=True, exist_ok=True)
     save_path = PREDICT_DIR / filename
     pil_image.save(save_path)
@@ -310,9 +310,10 @@ def save_heatmap(pil_image: Image.Image):
 
 def save_input_image(image_bytes: bytes):
     """
-    把原始輸入影像存到 GCS（若有設定 GCS_BUCKET_NAME），
-    回傳圖片 URL；沒設 GCS 時就存到本地 predict_data/inputs。
+    Save the original input image to GCS (if GCS_BUCKET_NAME is set),
+    return its image URL; if GCS is not configured, save locally under predict_data/inputs.
     """
+
     timestamp = int(time.time())
     filename = f"input_{timestamp}.jpg"
 
@@ -325,13 +326,13 @@ def save_input_image(image_bytes: bytes):
         blob.make_public()
         return blob.public_url
 
-    # 沒 GCS 就用本地，方便本機 debug
+    # Without GCS, save locally for debugging
     save_dir = os.path.join(os.path.dirname(__file__), "../predict_data/inputs")
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, filename)
     with open(save_path, "wb") as f:
         f.write(image_bytes)
-    # 前端跑在同一 origin 時會用 /predict_data/...
+    # When frontend runs under same origin, it uses /predict_data/...
     return f"predict_data/inputs/{filename}"
 
 # ------------- BigQuery logging -------------
@@ -347,9 +348,9 @@ def get_bq_client():
 
 def log_prediction_to_bigquery(payload: dict, job_id: str | None = None):
     """
-    Best-effort logging：失敗只印錯，不影響 API 回傳。
-    payload = hierarchical_predict() 要回傳給前端的 dict。
-    job_id   = 非同步流程的 UUID；同步 /predict 可以不用給。
+    Best-effort logging: failures are printed but do not affect the API response.
+    payload = the dict returned by hierarchical_predict() to the frontend.
+    job_id   = UUID for asynchronous processing; synchronous /predict can omit this.
     """
     try:
         client = get_bq_client()
@@ -386,8 +387,8 @@ def get_pub_publisher():
 
 def publish_inference_job(job_payload: dict):
     """
-    把推論工作丟進 Pub/Sub。
-    job_payload 建議包含：job_id, gcs_image_url, requested_at 等。
+    Send the inference job into Pub/Sub.
+    It is recommended that job_payload includes: job_id, gcs_image_url, requested_at, etc.
     """
     try:
         publisher = get_pub_publisher()
@@ -440,7 +441,7 @@ def hierarchical_predict(
     if not __LOADED:
         init_models()
 
-            # 儲存原始輸入影像（best-effort）
+            # Store raw input images（best-effort）
 
     input_image_url = None
     try:

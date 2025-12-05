@@ -13,19 +13,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
-# Copy only requirements first for caching
+# Copy only requirements first for better Docker layer caching
 COPY backend/requirements.txt ./requirements.txt
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy backend + worker code into container
+# Copy backend + worker code into the container
 COPY backend ./backend
 COPY worker ./worker
 
-# Let Python find /app as root package
+# Let Python treat /app as the root package
 ENV PYTHONPATH=/app
 
-# Cloud Run 會設定環境變數 PORT，我們用它來啟動 uvicorn
-# 注意這裡用的是 worker.worker_main:app
+# Cloud Run provides the PORT environment variable; use it to start uvicorn
+# Note: we are serving the FastAPI app from worker.worker_main:app
 CMD ["sh", "-c", "uvicorn worker.worker_main:app --host 0.0.0.0 --port ${PORT:-8080}"]

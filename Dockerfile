@@ -14,14 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy only requirements first for better Docker layer caching
-COPY requirements.txt ./requirements.txt
+COPY worker/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy ONLY the needed worker code
-COPY . ./worker
-COPY backend/app/utils_hierarchical.py ./backend/app/
-COPY backend/models ./backend/models
+COPY backend ./backend
+COPY worker ./worker
 
 # Let Python treat /app as the root package
 ENV PYTHONPATH=/app

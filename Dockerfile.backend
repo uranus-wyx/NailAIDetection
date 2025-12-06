@@ -16,14 +16,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ==== Python dependencies ====
 # Build context is backend/, so requirements.txt can be copied directly
-COPY requirements.txt .
+COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # ==== App code ====
 # Copy the entire backend project into /app/backend
 # This preserves the original import path: backend.app.main
-COPY . ./backend
+COPY backend ./backend
+
+COPY frontend ./frontend
 
 # Create predict_data directory (for saving local Grad-CAM outputs if needed)
 RUN mkdir -p /app/predict_data

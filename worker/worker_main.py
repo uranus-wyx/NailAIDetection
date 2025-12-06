@@ -40,6 +40,9 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]  # .../backend
 # -----------------------------------------------------------------------------
 app = FastAPI(title="NailAI Worker")
 
+@app.get("/health")
+def health():
+    return {"status": "worker ok"}
 
 @app.on_event("startup")
 def startup_event():

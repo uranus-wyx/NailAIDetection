@@ -17,8 +17,5 @@ data/
 datasets/
 notebooks/
 
-# Frontend build
-frontend/
-
 # Local prediction outputs
 predict_data/

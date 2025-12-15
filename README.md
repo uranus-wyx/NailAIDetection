@@ -89,7 +89,7 @@ BUCKET_NAME=nailai-demo-bucket
 ```
 HEATMAP_BUCKET=nailai-demo-bucket
 BQ_DATASET=nailai_analytics
-BQ_TABLE=inference_log
+BQ_TABLE=predictions
 ```
 
 ## **2. Create Storage Bucket**
@@ -117,7 +117,7 @@ bq --location=US mk nailai_analytics
 ```bash
 bq mk \
 --table \
-nailai_analytics.inference_log \
+nailai_analytics.predictions \
 schema.json
 ```
 
@@ -165,7 +165,7 @@ gcloud run deploy nailai-worker \
   --region us-central1 \
   --platform managed \
   --allow-unauthenticated \
-  --set-env-vars BQ_DATASET=nailai_analytics,BQ_TABLE=inference_log,HEATMAP_BUCKET=nailai-demo-bucket
+  --set-env-vars BQ_DATASET=nailai_analytics,BQ_TABLE=predictions,HEATMAP_BUCKET=nailai-demo-bucket
 
 ```
 

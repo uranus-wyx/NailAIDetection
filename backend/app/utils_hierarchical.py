@@ -69,6 +69,8 @@ FINE_PACKAGES: Dict[str, Path] = {
 
 # ----------------- Google Cloud Storage -----------------
 GCS_BUCKET_NAME = os.getenv("GCS_BUCKET_NAME") 
+HEATMAP_BUCKET = os.getenv("HEATMAP_BUCKET") or GCS_BUCKET_NAME
+
 _gcs_client = None
 
 def get_gcs_client():
@@ -276,64 +278,96 @@ coarse_to_fine_map = defaultdict(list)
 for fine, coarse in label_map_22_to_10.items():
     coarse_to_fine_map[coarse].append(fine)
 
-def save_heatmap(pil_image: Image.Image):
+def save_heatmap(pil_image: Image.Image) -> str | None:
     """
-    If GCS_BUCKET_NAME is set → upload to Cloud Storage and return public URL.
-    Otherwise, fallback to saving in local predict_data/ and return a relative path (for local debugging).
+    Priority:
+      - If HEATMAP_BUCKET (or GCS_BUCKET_NAME) is set → upload to Cloud Storage.
+        Path: gs://<bucket>/heatmaps/hint_<ts>.jpg
+        Return: public HTTPS URL for direct frontend use.
+      - Otherwise → save locally under backend/predict_data/.
+        Returns a relative path like "predict_data/<filename>" for local dev only.
     """
     timestamp = int(time.time())
     filename = f"hint_{timestamp}.jpg"
 
-    if GCS_BUCKET_NAME:
-        # Upload to GCS
-        client = get_gcs_client()
-        bucket = client.bucket(GCS_BUCKET_NAME)
-        blob_path = f"heatmaps/{filename}"
-        blob = bucket.blob(blob_path)
+    # ✅ Primary path: upload to GCS
+    if HEATMAP_BUCKET:
+        try:
+            client = get_gcs_client()
+            bucket = client.bucket(HEATMAP_BUCKET)
+            blob_path = f"heatmaps/{filename}"  # Your bucket already has heatmaps/ folder
+            blob = bucket.blob(blob_path)
 
-        # Save PIL image into memory before uploading
-        buf = io.BytesIO()
-        pil_image.save(buf, format="JPEG")
-        buf.seek(0)
+            # Save PIL image to memory buffer before upload
+            buf = io.BytesIO()
+            pil_image.save(buf, format="JPEG")
+            buf.seek(0)
 
-        blob.upload_from_file(buf, content_type="image/jpeg")
+            blob.upload_from_file(buf, content_type="image/jpeg")
 
-        # For demo purposes: make file public; production can switch to signed URLs
-        blob.make_public()
-        return blob.public_url
+            # For demo environments: make file public; production may switch to signed URLs
+            blob.make_public()
+            return blob.public_url  # e.g. https://storage.googleapis.com/<bucket>/heatmaps/hint_xxx.jpg
 
-    # Without GCS_BUCKET_NAME → keep original local behavior (for local development)
-    PREDICT_DIR.mkdir(parents=True, exist_ok=True)
-    save_path = PREDICT_DIR / filename
-    pil_image.save(save_path)
-    return f"predict_data/{filename}"
+        except Exception as e:
+            print(f"❌ Heatmap upload to GCS failed: {e}")
+            # Continue to fallback to avoid breaking inference
 
-def save_input_image(image_bytes: bytes):
+    # 🧪 Fallback: save locally if bucket is not configured
+    try:
+        PREDICT_DIR.mkdir(parents=True, exist_ok=True)
+        save_path = PREDICT_DIR / filename
+        pil_image.save(save_path, format="JPEG")
+
+        # Returned URL is relative; only useful in local dev with a static /predict_data route
+        return f"predict_data/{filename}"
+
+    except Exception as e:
+        print(f"❌ Heatmap local save failed: {e}")
+        return None
+
+def save_input_image(image_bytes: bytes) -> str | None:
     """
-    Save the original input image to GCS (if GCS_BUCKET_NAME is set),
-    return its image URL; if GCS is not configured, save locally under predict_data/inputs.
+    Save the original uploaded input image:
+      - If GCS_BUCKET_NAME is set → upload to Cloud Storage under inputs/
+      - Otherwise → save locally under backend/predict_data/inputs/,
+        returning a relative path usable only during local development.
     """
-
     timestamp = int(time.time())
     filename = f"input_{timestamp}.jpg"
 
+    # ✅ Primary path: upload to GCS
     if GCS_BUCKET_NAME:
-        client = get_gcs_client()
-        bucket = client.bucket(GCS_BUCKET_NAME)
-        blob_path = f"inputs/{filename}"
-        blob = bucket.blob(blob_path)
-        blob.upload_from_file(io.BytesIO(image_bytes), content_type="image/jpeg")
-        blob.make_public()
-        return blob.public_url
+        try:
+            client = get_gcs_client()
+            bucket = client.bucket(GCS_BUCKET_NAME)
+            blob_path = f"inputs/{filename}"
+            blob = bucket.blob(blob_path)
 
-    # Without GCS, save locally for debugging
-    save_dir = os.path.join(os.path.dirname(__file__), "../predict_data/inputs")
-    os.makedirs(save_dir, exist_ok=True)
-    save_path = os.path.join(save_dir, filename)
-    with open(save_path, "wb") as f:
-        f.write(image_bytes)
-    # When frontend runs under same origin, it uses /predict_data/...
-    return f"predict_data/inputs/{filename}"
+            blob.upload_from_file(io.BytesIO(image_bytes), content_type="image/jpeg")
+            blob.make_public()
+
+            return blob.public_url  # e.g. https://storage.googleapis.com/<bucket>/inputs/input_xxx.jpg
+
+        except Exception as e:
+            print(f"❌ Input image upload to GCS failed: {e}")
+            # Continue to fallback
+
+    # 🧪 Fallback: local mode, save under backend/predict_data/inputs/
+    try:
+        local_inputs_dir = PREDICT_DIR / "inputs"
+        local_inputs_dir.mkdir(parents=True, exist_ok=True)
+
+        save_path = local_inputs_dir / filename
+        with open(save_path, "wb") as f:
+            f.write(image_bytes)
+
+        # Relative path is only meaningful for localhost with static /predict_data serving
+        return f"predict_data/inputs/{filename}"
+
+    except Exception as e:
+        print(f"❌ Input image local save failed: {e}")
+        return None
 
 # ------------- BigQuery logging -------------
 BQ_DATASET = os.getenv("BQ_DATASET", "nailai_analytics")

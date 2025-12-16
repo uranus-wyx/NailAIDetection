@@ -174,12 +174,7 @@ def write_result_to_bigquery(job_id: str, image_url: str, result: Dict[str, Any]
 # -----------------------------------------------------------------------------
 @app.post("/")
 async def handle_pubsub(request: Request):
-    """
-    Pub/Sub push endpoint for the worker (Cloud Run service).
-    """
     envelope = await request.json()
-    logger.info(f"[worker] Received envelope: keys={list(envelope.keys())}")
-
     if not envelope or "message" not in envelope:
         raise HTTPException(status_code=400, detail="No Pub/Sub message received")
 
@@ -188,30 +183,27 @@ async def handle_pubsub(request: Request):
     if not data_b64:
         raise HTTPException(status_code=400, detail="Missing `data` in Pub/Sub message")
 
-    # Decode Pub/Sub data payload
     try:
         decoded = base64.b64decode(data_b64).decode("utf-8")
         payload = json.loads(decoded)
     except Exception as e:
-        logger.exception(f"[worker] Invalid Pub/Sub data: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid Pub/Sub data: {e}")
 
     job_id = payload.get("job_id") or message.get("messageId")
     image_url = payload.get("gcs_image_url") or payload.get("input_image_url")
-
     if not image_url:
         raise HTTPException(status_code=400, detail="No image URL in job payload")
 
-    logger.info(f"[worker] Received job_id={job_id}, image_url={image_url}")
+    print(f"[worker] Received job_id={job_id}, image_url={image_url}")
 
     # 1) Download image bytes
     try:
         image_bytes = download_image_bytes(image_url)
     except Exception as e:
-        logger.exception(f"[worker] Failed to download image for job_id={job_id}: {e}")
+        print(f"[worker] Failed to download image for job_id={job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download image: {e}")
 
-    # 2) Run inference
+    # 2) Run inference (+ BQ logging is done inside hierarchical_predict)
     try:
         result = hierarchical_predict(
             image_bytes=image_bytes,
@@ -221,26 +213,17 @@ async def handle_pubsub(request: Request):
             second_opinion_eps=0.08,
             min_local_conf_for_second=0.80,
             tta=True,
+            job_id=job_id,
         )
     except Exception as e:
-        logger.exception(f"[worker] Inference failed for job_id={job_id}: {e}")
+        print(f"[worker] Inference failed for job_id={job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
 
-    logger.info(
+    print(
         f"[worker] job_id={job_id} done: "
         f"{result.get('predicted_class')} ({result.get('confidence')}) via {result.get('routed_via')}"
     )
 
-    # 3) If heatmap_url is a local path, optionally upload it to GCS
-    raw_heatmap_url = result.get("heatmap_url")
-    if raw_heatmap_url and not str(raw_heatmap_url).startswith("http"):
-        local_heatmap_path = (BACKEND_ROOT / raw_heatmap_url).resolve()
-        gcs_heatmap_url = maybe_upload_heatmap_to_gcs(local_heatmap_path, job_id)
-        if gcs_heatmap_url:
-            result["heatmap_url"] = gcs_heatmap_url
-
-    # 4) Write result to BigQuery
-    write_result_to_bigquery(job_id, image_url, result)
-
-    # 5) Return 200 OK so Pub/Sub marks the message as ACKed
+    # No further heatmap processing and no additional BigQuery writes.
+    # Simply return 200 so Pub/Sub considers this message successfully handled.
     return JSONResponse({"status": "OK", "job_id": job_id})

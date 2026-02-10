@@ -394,55 +394,91 @@
       return captureRoiBlobStatic();
     }
 
-    // ====== Status polling for async mode ======
+    // ====== Status polling for async mode (backoff) ======
     function startStatusPolling(jobId) {
       currentJobId = jobId;
+
+      // stop any existing poll
       if (statusTimer) {
-        clearInterval(statusTimer);
+        clearTimeout(statusTimer);
         statusTimer = null;
       }
 
       const base = BASE_URL.replace(/\/+$/, "");
 
+      // backoff config
+      let delayMs = 2000;          // start fast: 2s
+      const maxDelayMs = 15000;    // cap: 15s (save money)
+      const maxWaitMs = 180000;    // stop after 3 min
+      const startTs = Date.now();
+
       async function checkOnce() {
         try {
-          const res = await fetch(`${base}/status/${currentJobId}`);
-          if (!res.ok) {
-            console.error("Status check failed", res.status);
+          // safety stop
+          if (Date.now() - startTs > maxWaitMs) {
+            resultBox.textContent = `⏳ Still processing. Please try again in a moment.`;
+            if (jobInfo) jobInfo.textContent = `Job ${currentJobId} ⏳ TIMEOUT`;
+            statusTimer = null;
             return;
           }
+
+          const res = await fetch(`${base}/status/${currentJobId}`, {
+            method: "GET",
+            cache: "no-store",
+          });
+
+          if (!res.ok) {
+            console.error("Status check failed", res.status);
+            // treat as transient error → slow down a bit and retry
+            delayMs = Math.min(Math.round(delayMs * 1.7), maxDelayMs);
+            statusTimer = setTimeout(checkOnce, delayMs);
+            return;
+          }
+
           const data = await res.json();
+
           if (data.status === "PENDING") {
             resultBox.textContent = `⏳ Job ${currentJobId} is still processing...`;
             if (jobInfo) jobInfo.textContent = `Job ${currentJobId} ⏳ PENDING`;
+
+            // backoff only when pending
+            delayMs = Math.min(Math.round(delayMs * 1.7), maxDelayMs);
+            statusTimer = setTimeout(checkOnce, delayMs);
             return;
           }
+
           if (data.status === "DONE") {
             renderPredictionFromData(data, base);
-            saveHistoryItem(
-              currentJobId,
-              data.predicted_class,
-              data.confidence
-            );
+            saveHistoryItem(currentJobId, data.predicted_class, data.confidence);
             if (jobInfo) jobInfo.textContent = `Job ${currentJobId} ✔ DONE`;
-            clearInterval(statusTimer);
             statusTimer = null;
-          } else if (data.status === "ERROR") {
+            return;
+          }
+
+          if (data.status === "ERROR") {
             resultBox.textContent = `❌ Job ${currentJobId} error: ${data.message || ""}`;
             if (jobInfo) jobInfo.textContent = `Job ${currentJobId} ❌ ERROR`;
-            clearInterval(statusTimer);
             statusTimer = null;
+            return;
           }
+
+          // unknown status → retry with backoff
+          console.warn("Unknown status:", data.status);
+          delayMs = Math.min(Math.round(delayMs * 1.7), maxDelayMs);
+          statusTimer = setTimeout(checkOnce, delayMs);
+
         } catch (err) {
           console.error("Status polling error", err);
+          // transient network error → backoff and retry
+          delayMs = Math.min(Math.round(delayMs * 1.7), maxDelayMs);
+          statusTimer = setTimeout(checkOnce, delayMs);
         }
       }
 
-      // Check once immediately, then every 3 seconds
-      checkOnce();
-      statusTimer = setInterval(checkOnce, 3000);
+      // kick off immediately (or after small delay)
+      statusTimer = setTimeout(checkOnce, 500);
     }
-
+  
     function saveHistoryItem(jobId, predClass, confidence) {
       const item = {
         job_id: jobId,

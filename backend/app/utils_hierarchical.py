@@ -18,6 +18,7 @@ from PIL import Image
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.image import show_cam_on_image
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
+from backend.app.runtime_assets import MODELS_DIR, ARTIFACTS_DIR, ensure_runtime_assets
 
 # ----------------- Device -----------------
 DEVICE = (
@@ -32,8 +33,7 @@ APP_DIR = Path(__file__).parent.resolve()          # backend/app
 BACKEND_DIR = (APP_DIR / "..").resolve()           # backend
 PROJECT_ROOT = (APP_DIR / "../..").resolve()       # root
 
-MODELS_DIR = (BACKEND_DIR / "models").resolve()    # coarse / binary / fine_* checkpoints
-ARTIFACTS = (BACKEND_DIR / "artifacts").resolve()  # coarse_labels.json / true_to_pred_idx.json / svp_order.json
+ARTIFACTS = ARTIFACTS_DIR
 PREDICT_DIR = (PROJECT_ROOT / "predict_data").resolve()
 
 # ----------------- Defaults -----------------
@@ -128,6 +128,8 @@ def init_models():
 
     if __LOADED:
         return
+
+    ensure_runtime_assets()
 
     # 1) Labels and mappings
     cl_path = ARTIFACTS / "coarse_labels.json"
@@ -326,12 +328,14 @@ def save_heatmap(pil_image: Image.Image) -> str | None:
         print(f"❌ Heatmap local save failed: {e}")
         return None
 
-def save_input_image(image_bytes: bytes) -> str | None:
+def save_input_image(image_bytes: bytes) -> tuple[Optional[str], Optional[str]]:
     """
-    Save the original uploaded input image:
-      - If GCS_BUCKET_NAME is set → upload to Cloud Storage under inputs/
-      - Otherwise → save locally under backend/predict_data/inputs/,
-        returning a relative path usable only during local development.
+    Upload original input image to GCS (preferred) or local fallback.
+
+    Returns:
+      (public_url, gcs_uri)
+      - public_url: https://storage.googleapis.com/<bucket>/inputs/<file>
+      - gcs_uri:    gs://<bucket>/inputs/<file>
     """
     timestamp = int(time.time())
     filename = f"input_{timestamp}.jpg"
@@ -345,15 +349,17 @@ def save_input_image(image_bytes: bytes) -> str | None:
             blob = bucket.blob(blob_path)
 
             blob.upload_from_file(io.BytesIO(image_bytes), content_type="image/jpeg")
-            blob.make_public()
+            # blob.make_public()
 
-            return blob.public_url  # e.g. https://storage.googleapis.com/<bucket>/inputs/input_xxx.jpg
+            public_url = blob.public_url
+            gcs_uri = f"gs://{GCS_BUCKET_NAME}/{blob_path}"
+            return public_url, gcs_uri
 
         except Exception as e:
             print(f"❌ Input image upload to GCS failed: {e}")
             # Continue to fallback
 
-    # 🧪 Fallback: local mode, save under backend/predict_data/inputs/
+    # 🧪 Fallback: local mode
     try:
         local_inputs_dir = PREDICT_DIR / "inputs"
         local_inputs_dir.mkdir(parents=True, exist_ok=True)
@@ -362,12 +368,12 @@ def save_input_image(image_bytes: bytes) -> str | None:
         with open(save_path, "wb") as f:
             f.write(image_bytes)
 
-        # Relative path is only meaningful for localhost with static /predict_data serving
-        return f"predict_data/inputs/{filename}"
+        rel = f"predict_data/inputs/{filename}"
+        return rel, None
 
     except Exception as e:
         print(f"❌ Input image local save failed: {e}")
-        return None
+        return None, None
 
 # ------------- BigQuery logging -------------
 BQ_DATASET = os.getenv("BQ_DATASET", "nailai_analytics")
@@ -450,6 +456,8 @@ def hierarchical_predict(
     min_local_conf_for_second: float = 0.80,
     # —— job id for async logging —— #
     job_id: str | None = None,
+    input_image_url: str | None = None,
+    input_gcs_uri: str | None = None,
     ):
     """
     image bytes → dict (directly FastAPI-serializable)
@@ -477,11 +485,14 @@ def hierarchical_predict(
 
             # Store raw input images（best-effort）
 
-    input_image_url = None
-    try:
-        input_image_url = save_input_image(image_bytes)
-    except Exception as e:
-        print(f"❌ Input image save failed: {e}")
+    if input_image_url is None:
+        try:
+            u, gs = save_input_image(image_bytes)
+            input_image_url = u
+            if input_gcs_uri is None:
+                input_gcs_uri = gs
+        except Exception as e:
+            print(f"❌ Input image save failed: {e}")
 
     # Preprocess input once; produce TTA variants if enabled
     x = transform_image(image_bytes)  # [1,3,224,224]
@@ -611,6 +622,7 @@ def hierarchical_predict(
         "fine_candidates": coarse_to_fine_map.get(routed_coarse, []),
         "heatmap_url": heatmap_url,
         "input_image_url": input_image_url,
+        "input_gcs_uri": input_gcs_uri,
         "routed_via": routed_via,
         "job_id": job_id,
     }

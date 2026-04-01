@@ -9,15 +9,18 @@ import uuid
 import json
 from datetime import datetime, timezone
 from google.cloud import bigquery
+import os
 
 from backend.app.utils_hierarchical import (
     init_models,
     hierarchical_predict,
     publish_inference_job,
     get_bq_client,
+    save_input_image,
     BQ_DATASET,
     BQ_TABLE,
 )
+from backend.app.runtime_assets import ensure_runtime_assets, frontend_hand_landmarker_url
 
 # ---------------- Paths ----------------
 # Resolve all paths relative to this file instead of the working directory.
@@ -48,11 +51,9 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="
 # ---------------- Lifecycle ----------------
 @app.on_event("startup")
 def _startup():
-    """
-    Load all models into memory at process startup.
-    utils_hierarchical.init_models() handles device selection and caching.
-    """
-    init_models()
+    ensure_runtime_assets(include_frontend=True)
+    if os.getenv("LOAD_MODELS", "0") == "1":
+        init_models()
 
 # ---------------- Health ----------------
 @app.get("/healthz")
@@ -71,7 +72,9 @@ async def root():
             "<h1>Frontend not found</h1><p>Expected at ./frontend/index.html</p>",
             status_code=404,
         )
-    return HTMLResponse(index_path.read_text(encoding="utf-8"))
+    html = index_path.read_text(encoding="utf-8")
+    html = html.replace("__HAND_LANDMARKER_MODEL_URL__", frontend_hand_landmarker_url())
+    return HTMLResponse(html)
 
 # ---------------- Inference ----------------
 @app.post("/predict")
@@ -213,7 +216,7 @@ async def submit_job(file: UploadFile = File(...)):
         input_image_url = None
         try:
             from backend.app.utils_hierarchical import save_input_image
-            input_image_url = save_input_image(image_bytes)
+            public_url, gcs_uri = save_input_image(image_bytes)
         except Exception as e:
             print(f"[submit] save_input_image failed: {e}")
             raise
@@ -225,7 +228,8 @@ async def submit_job(file: UploadFile = File(...)):
         # 3) Build Pub/Sub job payload
         job_payload = {
             "job_id": job_id,
-            "gcs_image_url": input_image_url,
+            "gcs_image_url": public_url,   # optional
+            "gcs_uri": gcs_uri,            # worker use this first
             "requested_at": requested_at,
         }
 
@@ -236,7 +240,7 @@ async def submit_job(file: UploadFile = File(...)):
         return JSONResponse(
             {
                 "job_id": job_id,
-                "input_image_url": input_image_url,
+                "input_image_url": public_url,
                 "status": "QUEUED",
                 "message": "Job accepted; processing asynchronously.",
             }

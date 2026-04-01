@@ -1,0 +1,47 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: <WORKER_SERVICE_NAME>
+  labels:
+    cloud.googleapis.com/location: <REGION>
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      serviceAccountName: <SERVICE_ACCOUNT_EMAIL>
+      containerConcurrency: 160
+      timeoutSeconds: 600
+      containers:
+        - image: <WORKER_IMAGE>
+          ports:
+            - containerPort: 8080
+              name: http1
+          env:
+            - name: BQ_DATASET
+              value: <BQ_DATASET>
+            - name: BQ_TABLE
+              value: <BQ_TABLE>
+            - name: HEATMAP_BUCKET
+              value: <BUCKET_NAME>
+            - name: RUNTIME_ASSET_MODE
+              value: "gcs"
+            - name: RUNTIME_ASSET_BUCKET
+              value: <RUNTIME_ASSET_BUCKET>
+            - name: RUNTIME_ASSET_PREFIX
+              value: <RUNTIME_ASSET_PREFIX>
+          resources:
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          startupProbe:
+            failureThreshold: 1
+            periodSeconds: 240
+            tcpSocket:
+              port: 8080
+            timeoutSeconds: 240
+  traffic:
+    - latestRevision: true
+      percent: 100

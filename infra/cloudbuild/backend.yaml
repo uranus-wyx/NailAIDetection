@@ -1,0 +1,13 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      [
+        "build",
+        "-t",
+        "<REGION>-docker.pkg.dev/<PROJECT_ID>/<ARTIFACT_REGISTRY_REPO>/<BACKEND_IMAGE_NAME>:latest",
+        "-f",
+        "Dockerfile.backend",
+        ".",
+      ]
+images:
+  - <REGION>-docker.pkg.dev/<PROJECT_ID>/<ARTIFACT_REGISTRY_REPO>/<BACKEND_IMAGE_NAME>:latest

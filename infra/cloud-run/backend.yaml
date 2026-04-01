@@ -1,0 +1,55 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: <BACKEND_SERVICE_NAME>
+  labels:
+    cloud.googleapis.com/location: <REGION>
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      serviceAccountName: <SERVICE_ACCOUNT_EMAIL>
+      containerConcurrency: 160
+      timeoutSeconds: 600
+      containers:
+        - image: <BACKEND_IMAGE>
+          ports:
+            - containerPort: 8080
+              name: http1
+          env:
+            - name: GCS_BUCKET_NAME
+              value: <BUCKET_NAME>
+            - name: LOAD_MODELS
+              value: "1"
+            - name: BQ_DATASET
+              value: <BQ_DATASET>
+            - name: BQ_TABLE
+              value: <BQ_TABLE>
+            - name: ENABLE_BQ_LOGGING
+              value: "true"
+            - name: PUBSUB_TOPIC
+              value: projects/<PROJECT_ID>/topics/<PUBSUB_TOPIC>
+            - name: RUNTIME_ASSET_MODE
+              value: "gcs"
+            - name: RUNTIME_ASSET_BUCKET
+              value: <RUNTIME_ASSET_BUCKET>
+            - name: RUNTIME_ASSET_PREFIX
+              value: <RUNTIME_ASSET_PREFIX>
+            - name: HAND_LANDMARKER_MODEL_URL
+              value: gs://<RUNTIME_ASSET_BUCKET>/<RUNTIME_ASSET_PREFIX>/frontend/static/models/hand_landmarker.task
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          startupProbe:
+            failureThreshold: 1
+            periodSeconds: 240
+            tcpSocket:
+              port: 8080
+            timeoutSeconds: 240
+  traffic:
+    - latestRevision: true
+      percent: 100

@@ -11,11 +11,13 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi import UploadFile, File
 
 from google.cloud import storage, bigquery
 
 # Import the same hierarchical inference used by the backend
 from backend.app.utils_hierarchical import init_models, hierarchical_predict
+from backend.app.runtime_assets import ensure_runtime_assets
 
 # -----------------------------------------------------------------------------
 # Global configuration (read from environment when possible)
@@ -67,6 +69,7 @@ def startup_event():
 
     # Initialize models
     try:
+        ensure_runtime_assets()
         init_models()
         logger.info("[worker] Models initialized")
     except Exception as e:
@@ -88,6 +91,11 @@ def startup_event():
         logger.exception(f"[worker] Failed to initialize Storage client: {e}")
         storage_client = None
 
+@app.post("/predict")
+async def predict_sync(file: UploadFile = File(...)):
+    image_bytes = await file.read()
+    result = hierarchical_predict(image_bytes=image_bytes, tta=True, job_id=None)
+    return JSONResponse(result)
 
 # -----------------------------------------------------------------------------
 # Helper: download image bytes from GCS URL (or any HTTP URL)
@@ -100,6 +108,22 @@ def download_image_bytes(image_url: str) -> bytes:
     with urlopen(image_url) as resp:
         return resp.read()
 
+# -----------------------------------------------------------------------------
+# Helper: read GCS URI 
+# -----------------------------------------------------------------------------
+def read_gcs_uri(gs_uri: str) -> bytes:
+    # gs://bucket_name/object_path
+    if storage_client is None:
+        raise RuntimeError("storage_client not initialized")
+
+    if not gs_uri.startswith("gs://"):
+        raise ValueError("Not a gs:// URI")
+
+    _, _, rest = gs_uri.partition("gs://")
+    bucket_name, _, blob_name = rest.partition("/")
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    return blob.download_as_bytes()
 
 # -----------------------------------------------------------------------------
 # Helper: upload local heatmap file to GCS (optional)
@@ -198,7 +222,11 @@ async def handle_pubsub(request: Request):
 
     # 1) Download image bytes
     try:
-        image_bytes = download_image_bytes(image_url)
+        gcs_uri = payload.get("gcs_uri")
+        if gcs_uri:
+            image_bytes = read_gcs_uri(gcs_uri)
+        else:
+            image_bytes = download_image_bytes(image_url)
     except Exception as e:
         print(f"[worker] Failed to download image for job_id={job_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to download image: {e}")
@@ -214,6 +242,8 @@ async def handle_pubsub(request: Request):
             min_local_conf_for_second=0.80,
             tta=True,
             job_id=job_id,
+            input_image_url=image_url,   # payload - gcs_image_url or input_image_url
+            input_gcs_uri=gcs_uri,       # payload.get("gcs_uri")
         )
     except Exception as e:
         print(f"[worker] Inference failed for job_id={job_id}: {e}")

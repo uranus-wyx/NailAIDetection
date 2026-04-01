@@ -1,294 +1,147 @@
-# NailAI: Cloud-Powered Fine-Grained Nail Disease Detection System 🩺
+# Nail Detection
 
-NailAI is a fully serverless, production-ready medical AI pipeline that scales automatically and provides explainable fine-grained diagnostics through a cloud-native microservice design.
+Deployment-focused GCP repository for serving a nail image inference application.
 
-🌐 https://nailai-backend-299381123286.us-central1.run.app/
+This repository is intended to stay GitHub-safe:
+- application code stays here
+- infrastructure templates stay here
+- private datasets, notebooks, checkpoints, local environments, and scratch outputs stay out
 
-NailAI is a full-stack cloud-hosted AI diagnosis system that detects **22 fine-grained nail diseases** using a ResNet-18 model with Grad-CAM explainability.
-
-The system demonstrates a complete **serverless AI microservice architecture**, including:
-
-- **Cloud Run** (frontend + backend)
-- **Pub/Sub** (job queue)
-- **Cloud Run Worker** (async inference)
-- **Cloud Storage** (image storage + Grad-CAM)
-- **BigQuery** (analytics log)
-- **JS Web UI** (upload + camera mode)
-- **Fine-grained hierarchical classifier**
-
-This project serves as the final project for **CSCI4253/5253 – Datacenter Scale Computing**.
-
-
-# ✨ Features
-
-✅ Fine-grained ML classifier (22 categories)  
-✅ Async AI pipeline using Pub/Sub  
-✅ Cloud Run scalable backend  
-✅ Background worker container for inference  
-✅ Grad-CAM heatmap generation  
-✅ BigQuery logging  
-✅ Fully responsive web UI  
-✅ Camera capture → ROI extraction → inference  
-✅ Local browser history viewer  
-✅ 100% serverless, auto-scaling  
-
-# 🏗️ System Architecture
-
-![Architecture](assets/architecture.jpg)
-
-# 📁 Repository Structure
+## Repository Layout
 
 ```text
-NailAI/
-│
+Nail_Detection/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py               
-│   │   ├── utils_hierarchical.py
-│   │   ├── inference.py          
-│   ├── artifacts/
-│   │   ├── labels.json           
-│   ├── models/
-│   │   ├── nail_model.pth        
+│   ├── artifacts/              # Runtime metadata; review before publishing
+│   ├── models/                 # Runtime model files; review before publishing
 │   └── requirements.txt
-│   └── Dockerfile
-│
 ├── worker/
-│   ├── worker_main.py            
-│   └── Dockerfile
-│
+│   ├── worker_main.py
+│   └── requirements.txt
 ├── frontend/
 │   ├── index.html
-│   ├── static/
-│       ├── js/static_frame.js
-│       ├── css/style.css
-│       └── favicon.ico
-│
-└── README.md
+│   └── static/
+├── infra/
+│   ├── cloud-run/
+│   │   ├── backend.yaml
+│   │   └── worker.yaml
+│   └── cloudbuild/
+│       ├── backend.yaml
+│       └── worker.yaml
+├── scripts/
+│   └── loadtest/
+│       └── locustfile.py
+├── docs/
+│   └── assets/
+├── Dockerfile.backend
+├── Dockerfile.worker
+└── .gitignore
 ```
 
-# 🚀 Deployment Guide (Cloud Run + Cloud Build)
+## What Belongs Here
 
-## **1. Enable Required GCP Services**
-```bash
-gcloud services enable \
-  run.googleapis.com \
-  cloudbuild.googleapis.com \
-  pubsub.googleapis.com \
-  bigquery.googleapis.com \
-  storage.googleapis.com
-````
+- Backend inference API code
+- Worker code
+- Frontend assets
+- Dockerfiles
+- GCP deployment templates
+- Build configuration
+- Load testing scripts
+- Documentation assets
 
-### Backend Env Vars
-```
-PUBSUB_TOPIC=nailai-jobs
-BUCKET_NAME=nailai-demo-bucket
-```
+## What Should Stay Out
 
-### Worker Env Vars
-```
-HEATMAP_BUCKET=nailai-demo-bucket
-BQ_DATASET=nailai_analytics
-BQ_TABLE=predictions
-```
+- Training datasets
+- Jupyter notebooks
+- Experiment outputs
+- Local virtual environments
+- Temporary prediction images
+- Logs and caches
+- Private checkpoints not required for deployed runtime
 
-## **2. Create Storage Bucket**
+## Deployment Notes
 
-```bash
-gsutil mb -l us-central1 gs://nailai-demo-bucket/
-```
+The templates under `infra/` are sanitized examples. Replace placeholders before deployment:
+- `<PROJECT_ID>`
+- `<REGION>`
+- `<ARTIFACT_REGISTRY_REPO>`
+- `<BACKEND_IMAGE>`
+- `<WORKER_IMAGE>`
+- `<BUCKET_NAME>`
+- `<PUBSUB_TOPIC>`
+- `<BQ_DATASET>`
+- `<BQ_TABLE>`
+- `<SERVICE_ACCOUNT_EMAIL>`
 
-## **3. Create Pub/Sub Topic**
+## Runtime Asset Review
 
-```bash
-gcloud pubsub topics create nailai-jobs
-```
+The following paths were intentionally left in place because they may be required at runtime and should be reviewed manually before publishing:
+- `backend/models/`
+- `backend/artifacts/`
+- `frontend/static/models/`
 
-## **4. Create BigQuery Dataset + Table**
+If you want a fully code-only public repository, move those runtime assets to private storage and load or download them during build or deploy.
 
-### Dataset:
+## Private Runtime Assets
 
-```bash
-bq --location=US mk nailai_analytics
-```
+A clean public clone does not need to store private runtime assets in git.
 
-### Table:
+This repository includes minimal scaffolding for external asset loading:
+- Backend and worker can download missing private backend assets from GCS at startup/runtime.
+- Frontend camera runtime keeps using `/static/models/hand_landmarker.task`.
+- If `HAND_LANDMARKER_MODEL_URL` is set on the backend service, the backend downloads that file at startup into the local static path.
 
-```bash
-bq mk \
---table \
-nailai_analytics.predictions \
-schema.json
-```
+### Backend and Worker Asset Variables
 
-Example schema:
+- `RUNTIME_ASSET_MODE=local|gcs`
+- `RUNTIME_ASSET_BUCKET=<private-bucket>`
+- `RUNTIME_ASSET_PREFIX=<optional-prefix>`
+- `MODELS_DIR=<optional-local-model-dir>`
+- `ARTIFACTS_DIR=<optional-local-artifact-dir>`
 
-```json
-[
-  {"name": "job_id", "type": "STRING"},
-  {"name": "predicted_class", "type": "STRING"},
-  {"name": "confidence", "type": "FLOAT"},
-  {"name": "image_path", "type": "STRING"},
-  {"name": "heatmap_path", "type": "STRING"},
-  {"name": "timestamp", "type": "TIMESTAMP"}
-]
-```
+When `RUNTIME_ASSET_MODE=gcs`, the app expects these objects:
 
-# 🐳 5. Deploy Backend (Cloud Run)
-
-From backend:
-
-```bash
-gcloud builds submit . \
-  --tag gcr.io/nailai-demo/nailai-backend \
-  --project=nailai-demo
-
-gcloud run deploy nailai-backend \
-  --image gcr.io/nailai-demo/nailai-backend \
-  --region us-central1 \
-  --platform managed \
-  --allow-unauthenticated \
+```text
+gs://<RUNTIME_ASSET_BUCKET>/<RUNTIME_ASSET_PREFIX>/backend/models/...
+gs://<RUNTIME_ASSET_BUCKET>/<RUNTIME_ASSET_PREFIX>/backend/artifacts/...
 ```
 
-# 🐳 6. Deploy Worker (Cloud Run)
+### Frontend Asset Variable
 
-```bash
-# build
-docker build -t nailai-worker -f worker/Dockerfile .
-# tag
-docker tag nailai-worker gcr.io/nailai-demo/nailai-worker
-# push
-docker push gcr.io/nailai-demo/nailai-worker
+- `HAND_LANDMARKER_MODEL_URL=<gs://... or https://... source for hand_landmarker.task>`
 
-gcloud run deploy nailai-worker \
-  --image gcr.io/nailai-demo/nailai-worker \
-  --region us-central1 \
-  --platform managed \
-  --allow-unauthenticated \
-  --set-env-vars BQ_DATASET=nailai_analytics,BQ_TABLE=predictions,HEATMAP_BUCKET=nailai-demo-bucket
+Recommended choices:
+- Backend models and artifacts: private GCS download at startup
+- Frontend hand landmarker: backend startup download to `/static/models/hand_landmarker.task`
 
+### Cloud Run Environment Variables
+
+Backend service:
+- `LOAD_MODELS=1`
+- `RUNTIME_ASSET_MODE=gcs`
+- `RUNTIME_ASSET_BUCKET=<private-runtime-asset-bucket>`
+- `RUNTIME_ASSET_PREFIX=<optional-prefix>`
+- `HAND_LANDMARKER_MODEL_URL=gs://<private-runtime-asset-bucket>/<optional-prefix>/frontend/static/models/hand_landmarker.task`
+- `GCS_BUCKET_NAME=<app-bucket>`
+- `BQ_DATASET=<dataset>`
+- `BQ_TABLE=<table>`
+- `PUBSUB_TOPIC=projects/<PROJECT_ID>/topics/<TOPIC_NAME>`
+
+Worker service:
+- `RUNTIME_ASSET_MODE=gcs`
+- `RUNTIME_ASSET_BUCKET=<private-runtime-asset-bucket>`
+- `RUNTIME_ASSET_PREFIX=<optional-prefix>`
+- `BQ_DATASET=<dataset>`
+- `BQ_TABLE=<table>`
+- `HEATMAP_BUCKET=<app-bucket>`
+
+Expected private bucket layout:
+
+```text
+gs://<RUNTIME_ASSET_BUCKET>/<RUNTIME_ASSET_PREFIX>/backend/models/...
+gs://<RUNTIME_ASSET_BUCKET>/<RUNTIME_ASSET_PREFIX>/backend/artifacts/...
+gs://<RUNTIME_ASSET_BUCKET>/<RUNTIME_ASSET_PREFIX>/frontend/static/models/hand_landmarker.task
 ```
 
-Bind worker to the Pub/Sub trigger:
-
-```bash
-gcloud run services add-iam-policy-binding nailai-worker \
-  --member=serviceAccount:PROJECT_NUM-compute@developer.gserviceaccount.com \
-  --role=roles/run.invoker
-```
-
-```bash
-gcloud pubsub subscriptions create nailai-sub \
-  --topic nailai-jobs \
-  --push-endpoint=https://nailai-worker-xxxxxx.run.app/ \
-  --push-auth-service-account=PROJECT_NUM-compute@developer.gserviceaccount.com
-```
-
-# 🧪 Local Development
-
-### Install dependencies:
-
-```bash
-pip install -r backend/requirements.txt
-```
-
-### Run:
-
-```bash
-cd backend
-uvicorn app.main:app --reload --port 8080
-```
-
-# 🌐 Frontend Usage
-
-Open:
-
-```
-https://<CLOUD_RUN_BACKEND_URL>
-# https://nailai-backend-299381123286.us-central1.run.app/
-```
-
-Features:
-
-* 📤 Upload image
-* 📸 Camera mode with ROI capture
-* 🔄 `/submit` async inference
-* 🔍 `/status/{job_id}` polling
-* 🔥 Grad-CAM heatmap
-* 🕘 Local history viewer (browser only)
-
-# 🧠 ML Model
-
-* ResNet-18 backbone
-* Fine-grained classification: 22 nail diseases
-* Softmax probability
-* Grad-CAM explanation
-* Hierarchical coarse → fine routing
-
-# 🔍 Demo Flow
-
-1. User uploads image or captures via camera
-![Architecture](assets/demo1.png)
-
-2. Frontend sends **POST /submit**
-![Architecture](assets/demo2.png)
-
-
-3. Backend:
-
-   * Stores image
-   * Publishes Pub/Sub message
-
-**Store images into buckets**
-![Architecture](assets/demo3.png)
-
-**Job is processing in queue**
-![Architecture](assets/demo4.png)
-
-
-4. Worker:
-
-   * Runs inference
-   * Generates heatmap
-   * Writes to BigQuery
-
-**Check data in BigQuery**
-```
-SELECT
-  predicted_at,
-  predicted_class,
-  confidence,
-  routed_via,
-  input_image_url,
-  heatmap_url
-FROM `nailai-demo.nailai_analytics.predictions`
-ORDER BY predicted_at DESC
-LIMIT 10;
-```
-
-![Architecture](assets/demo5.png)
-
-
-5. Frontend:
-
-   * Polls /status
-   * Displays results + heatmap
-
-![Architecture](assets/demo6.png)
-
-
-# ⚠️ Troubleshooting
-
-### Cloud Logging
-```
-gcloud logs read --project nailai-demo --limit 50
-```
-
-| Issue                         | Fix                                      |
-| ----------------------------- | ---------------------------------------- |
-| 404 on heatmap                | Check Cloud Storage file path            |
-| Pub/Sub not triggering worker | Verify subscription push URL             |
-| Worker returning 500          | Check Cloud Logging                      |
-| CORS issues                   | Deploy frontend & backend to same origin |
-| BigQuery insert failed        | Check schema mismatch                    |
-
+This keeps the public repository code-focused while allowing private runtime assets to be provided outside git.
